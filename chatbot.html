@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Learning Chatbot</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.18.0/dist/tf.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        
+        #chat-container {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 20px;
+            height: 300px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+        
+        .user-message {
+            background-color: #e6f7ff;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            text-align: right;
+        }
+        
+        .bot-message {
+            background-color: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        
+        #user-input {
+            width: calc(100% - 80px);
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        
+        #send-button {
+            width: 70px;
+            padding: 10px;
+            background-color: #0095ff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        .feedback-buttons {
+            margin-top: 5px;
+        }
+        
+        .feedback-button {
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            padding: 3px 8px;
+            margin-right: 5px;
+            cursor: pointer;
+        }
+        
+        #learning-info {
+            margin-top: 30px;
+        }
+        
+        .info-section {
+            margin-bottom: 20px;
+        }
+        
+        .info-header {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .small-text {
+            font-size: 12px;
+        }
+        
+        progress {
+            width: 100%;
+            height: 20px;
+        }
+        
+        #metrics {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        
+        .metric {
+            text-align: center;
+            flex: 1;
+        }
+        
+        .metric-value {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        
+        .tabs {
+            display: flex;
+            margin-bottom: 10px;
+        }
+        
+        .tab {
+            padding: 8px 16px;
+            cursor: pointer;
+            border: 1px solid #ccc;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            background-color: #f0f0f0;
+        }
+        
+        .tab.active {
+            background-color: white;
+            border-bottom: 1px solid white;
+            margin-bottom: -1px;
+        }
+        
+        .tab-content {
+            border: 1px solid #ccc;
+            padding: 16px;
+            border-radius: 0 4px 4px 4px;
+        }
+        
+        .tab-pane {
+            display: none;
+        }
+        
+        .tab-pane.active {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Advanced Learning Chatbot</h1>
+    <p>This chatbot uses multiple algorithms to learn how to talk: n-grams for phrases, neural networks for word relationships, and reinforcement learning from your feedback.</p>
+    
+    <div id="chat-container"></div>
+    
+    <div>
+        <input type="text" id="user-input" placeholder="Type your message...">
+        <button id="send-button">Send</button>
+    </div>
+    
+    <div id="learning-info">
+        <div id="metrics">
+            <div class="metric">
+                <div class="metric-value" id="vocab-size">0</div>
+                <div class="metric-label">Vocabulary Size</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="phrases-learned">0</div>
+                <div class="metric-label">Phrases Learned</div>
+            </div>
+            <div class="metric">
+                <div class="metric-value" id="avg-reward">0.0</div>
+                <div class="metric-label">Avg. Reward</div>
+            </div>
+        </div>
+        
+        <div class="info-section">
+            <div class="info-header">Learning Progress</div>
+            <progress id="learning-progress" value="0" max="100"></progress>
+        </div>
+        
+        <div class="tabs">
+            <div class="tab active" data-tab="ngram">N-gram Model</div>
+            <div class="tab" data-tab="network">Neural Network</div>
+            <div class="tab" data-tab="rl">Reinforcement Learning</div>
+        </div>
+        
+        <div class="tab-content">
+            <div class="tab-pane active" id="ngram-tab">
+                <div class="info-header">Top N-grams</div>
+                <div id="ngram-list" class="small-text"></div>
+            </div>
+            
+            <div class="tab-pane" id="network-tab">
+                <div class="info-header">Word Embeddings (2D Projection)</div>
+                <canvas id="embedding-canvas" width="750" height="300"></canvas>
+            </div>
+            
+            <div class="tab-pane" id="rl-tab">
+                <div class="info-header">Recent Rewards</div>
+                <canvas id="reward-canvas" width="750" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Global variables
+        let vocabulary = new Set();
+        let wordIndex = {};
+        let indexWord = {};
+        let model;
+        const embeddingSize = 5;
+        let nGramCounts = {};
+        let recentRewards = [];
+        
+        // DOM elements
+        const chatContainer = document.getElementById('chat-container');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+        const vocabSizeElement = document.getElementById('vocab-size');
+        const phrasesLearnedElement = document.getElementById('phrases-learned');
+        const avgRewardElement = document.getElementById('avg-reward');
+        const learningProgressElement = document.getElementById('learning-progress');
+        const ngramListElement = document.getElementById('ngram-list');
+        const embeddingCanvas = document.getElementById('embedding-canvas');
+        const rewardCanvas = document.getElementById('reward-canvas');
+        
+        // Tab handling
+        const tabs = document.querySelectorAll('.tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active class from all tabs and panes
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                
+                // Add active class to clicked tab and corresponding pane
+                tab.classList.add('active');
+                document.getElementById(`${tab.dataset.tab}-tab`).classList.add('active');
+                
+                // Refresh visualizations
+                if (tab.dataset.tab === 'network') {
+                    visualizeEmbeddings();
+                } else if (tab.dataset.tab === 'rl') {
+                    visualizeRewards();
+                }
+            });
+        });
+        
+        async function loadVocabulary() {
+            try {
+                const response = await fetch('words.txt'); // Ensure 'words.txt' is accessible via a server
+                if (!response.ok) throw new Error("Failed to load words.txt");
+
+                const text = await response.text();
+                const words = text.split(/\r?\n/).map(word => word.trim()).filter(word => word.length > 0);
+                
+                document.getElementById('vocab-size').textContent = words.length;
+                console.log("Loaded vocabulary:", words);
+            } catch (error) {
+                console.error("Error loading vocabulary:", error);
+                document.getElementById('vocab-container').innerHTML = `<p style="color:red;">Error loading vocabulary.</p>`;
+            }
+        }
+
+        // Load vocabulary on page load
+        window.onload = loadVocabulary;
+        
+        // Helper functions
+        function tokenize(text) {
+            return text.toLowerCase()
+                .replace(/[^\w\s']|_/g, "")
+                .replace(/\s+/g, " ")
+                .trim()
+                .split(" ")
+                .filter(word => word.length > 0);
+        }
+        
+        function updateNGramModel(words, n = 2) {
+            for (let i = 0; i <= words.length - n; i++) {
+                const ngram = words.slice(i, i + n).join(' ');
+                if (!nGramCounts[ngram]) {
+                    nGramCounts[ngram] = 0;
+                }
+                nGramCounts[ngram]++;
+            }
+            updateNGramDisplay();
+        }
+        
+        function updateNGramDisplay() {
+            // Get top 20 n-grams by count
+            const topNGrams = Object.entries(nGramCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 20);
+            
+            ngramListElement.innerHTML = topNGrams
+                .map(([ngram, count]) => `"${ngram}": ${count}`)
+                .join('<br>');
+            
+            phrasesLearnedElement.textContent = Object.keys(nGramCounts).length;
+        }
+        
+        function updateVocabulary(words) {
+            let newWordsAdded = false;
+            
+            words.forEach(word => {
+                if (!vocabulary.has(word)) {
+                    vocabulary.add(word);
+                    newWordsAdded = true;
+                }
+            });
+            
+            if (newWordsAdded) {
+                // Rebuild word indices
+                wordIndex = {};
+                indexWord = {};
+                Array.from(vocabulary).sort().forEach((word, index) => {
+                    wordIndex[word] = index;
+                    indexWord[index] = word;
+                });
+                
+                // Update the model if necessary
+                if (vocabulary.size > 10) {
+                    if (!model) {
+                        createModel();
+                    } else {
+                        // Expand the model for the new vocabulary
+                        const oldModel = model;
+                        createModel();
+                        
+                        // Transfer weights from old model where possible
+                        const oldWeights = oldModel.getWeights();
+                        const newWeights = model.getWeights();
+                        
+                        // Copy embedding weights for existing words
+                        const oldEmbeddings = oldWeights[0].arraySync();
+                        const newEmbeddings = newWeights[0].arraySync();
+                        
+                        for (let word in wordIndex) {
+                            if (word in wordIndex && wordIndex[word] < oldEmbeddings.length) {
+                                newEmbeddings[wordIndex[word]] = oldEmbeddings[wordIndex[word]];
+                            }
+                        }
+                        
+                        // Set the weights back
+                        model.setWeights([tf.tensor2d(newEmbeddings)]);
+                    }
+                }
+            }
+            
+            vocabSizeElement.textContent = vocabulary.size;
+            updateProgress();
+        }
+        
+        function createModel() {
+            // Simple embedding model
+            model = tf.sequential();
+            model.add(tf.layers.embedding({
+                inputDim: vocabulary.size,
+                outputDim: embeddingSize,
+                inputLength: 1
+            }));
+            
+            model.compile({
+                optimizer: tf.train.adam(0.1),
+                loss: 'meanSquaredError'
+            });
+        }
+        
+        async function trainOnPair(word1, word2, label = 1) {
+            if (!model || !(word1 in wordIndex) || !(word2 in wordIndex)) return;
+            
+            const idx1 = wordIndex[word1];
+            const idx2 = wordIndex[word2];
+            
+            // Prepare the data
+            const input = tf.tensor2d([idx1, idx2], [2, 1]);
+            const output = tf.tensor2d([[label], [label]], [2, 1]);
+            
+            // Train for a single step
+            await model.fit(input, output, {
+                epochs: 1,
+                verbose: 0
+            });
+        }
+        
+        function getWordEmbedding(word) {
+            if (!model || !(word in wordIndex)) return null;
+            
+            const input = tf.tensor2d([wordIndex[word]], [1, 1]);
+            const embedding = model.predict(input);
+            return embedding.arraySync()[0];
+        }
+        
+        function visualizeEmbeddings() {
+            if (!model) return;
+            
+            const ctx = embeddingCanvas.getContext('2d');
+            ctx.clearRect(0, 0, embeddingCanvas.width, embeddingCanvas.height);
+            
+            // Get embeddings for all words
+            const embeddings = [];
+            for (let word of vocabulary) {
+                const embedding = getWordEmbedding(word);
+                if (embedding) {
+                    embeddings.push({ word, embedding });
+                }
+            }
+            
+            if (embeddings.length < 2) return;
+            
+            // Use first two dimensions for visualization
+            // Find min/max for scaling
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+            
+            embeddings.forEach(({ embedding }) => {
+                minX = Math.min(minX, embedding[0]);
+                maxX = Math.max(maxX, embedding[0]);
+                minY = Math.min(minY, embedding[1]);
+                maxY = Math.max(maxY, embedding[1]);
+            });
+            
+            const padding = 30;
+            const width = embeddingCanvas.width - 2 * padding;
+            const height = embeddingCanvas.height - 2 * padding;
+            
+            // Draw axes
+            ctx.strokeStyle = '#ccc';
+            ctx.beginPath();
+            ctx.moveTo(padding, embeddingCanvas.height - padding);
+            ctx.lineTo(embeddingCanvas.width - padding, embeddingCanvas.height - padding);
+            ctx.moveTo(padding, embeddingCanvas.height - padding);
+            ctx.lineTo(padding, padding);
+            ctx.stroke();
+            
+            // Draw points and labels
+            embeddings.forEach(({ word, embedding }) => {
+                const x = padding + ((embedding[0] - minX) / (maxX - minX)) * width;
+                const y = embeddingCanvas.height - padding - ((embedding[1] - minY) / (maxY - minY)) * height;
+                
+                ctx.fillStyle = '#0095ff';
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, 2 * Math.PI);
+                ctx.fill();
+                
+                ctx.fillStyle = '#333';
+                ctx.font = '10px Arial';
+                ctx.fillText(word, x + 5, y);
+            });
+        }
+        
+        function visualizeRewards() {
+            const ctx = rewardCanvas.getContext('2d');
+            ctx.clearRect(0, 0, rewardCanvas.width, rewardCanvas.height);
+            
+            if (recentRewards.length < 2) return;
+            
+            const padding = 30;
+            const width = rewardCanvas.width - 2 * padding;
+            const height = rewardCanvas.height - 2 * padding;
+            
+            // Draw axes
+            ctx.strokeStyle = '#ccc';
+            ctx.beginPath();
+            ctx.moveTo(padding, embeddingCanvas.height - padding);
+            ctx.lineTo(embeddingCanvas.width - padding, embeddingCanvas.height - padding);
+            ctx.moveTo(padding, embeddingCanvas.height - padding);
+            ctx.lineTo(padding, padding);
+            ctx.stroke();
+            
+            // X-axis labels
+            ctx.fillStyle = '#333';
+            ctx.font = '10px Arial';
+            ctx.fillText('Oldest', padding, embeddingCanvas.height - padding + 15);
+            ctx.fillText('Newest', embeddingCanvas.width - padding - 30, embeddingCanvas.height - padding + 15);
+            
+            // Y-axis labels
+            ctx.fillText('-1', padding - 15, embeddingCanvas.height - padding);
+            ctx.fillText('0', padding - 10, embeddingCanvas.height - padding - height/2);
+            ctx.fillText('+1', padding - 15, padding + 5);
+            
+            // Draw the line
+            ctx.strokeStyle = '#0095ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            recentRewards.forEach((reward, i) => {
+                const x = padding + (i / (recentRewards.length - 1)) * width;
+                // Map reward [-1, 1] to y coordinate
+                const y = embeddingCanvas.height - padding - ((reward + 1) / 2) * height;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            
+            ctx.stroke();
+        }
+        
+        function updateRewards(reward) {
+            recentRewards.push(reward);
+            if (recentRewards.length > 20) {
+                recentRewards.shift();
+            }
+            
+            // Update average reward display
+            const avg = recentRewards.reduce((sum, val) => sum + val, 0) / recentRewards.length;
+            avgRewardElement.textContent = avg.toFixed(1);
+            
+            visualizeRewards();
+        }
+        
+        function generateResponse(userMessage) {
+            const userWords = tokenize(userMessage);
+            if (userWords.length === 0) return "Please tell me something.";
+            
+            // 1. Try to use n-grams to find a relevant response
+            let candidateWords = [];
+            
+            // Find n-grams that contain user words
+            for (let ngram in nGramCounts) {
+                const ngramWords = ngram.split(' ');
+                if (userWords.some(word => ngramWords.includes(word))) {
+                    candidateWords.push(...ngramWords);
+                }
+            }
+            
+            // If we found some candidates, use them
+            if (candidateWords.length > 0) {
+                // Get unique candidates and sort by frequency
+                const wordCounts = {};
+                candidateWords.forEach(word => {
+                    if (!wordCounts[word]) wordCounts[word] = 0;
+                    wordCounts[word]++;
+                });
+                
+                candidateWords = Object.keys(wordCounts).sort((a, b) => wordCounts[b] - wordCounts[a]);
+                
+                // Use embeddings to find related words if we have a model
+                if (model) {
+                    const expandedCandidates = [...candidateWords];
+                    
+                    userWords.forEach(userWord => {
+                        if (userWord in wordIndex) {
+                            const userEmbedding = getWordEmbedding(userWord);
+                            
+                            // Find related words based on embedding similarity
+                            if (userEmbedding) {
+                                for (let word of vocabulary) {
+                                    if (!candidateWords.includes(word) && word in wordIndex) {
+                                        const wordEmbedding = getWordEmbedding(word);
+                                        if (wordEmbedding) {
+                                            // Simple cosine similarity
+                                            let dotProduct = 0;
+                                            let userMagnitude = 0;
+                                            let wordMagnitude = 0;
+                                            
+                                            for (let i = 0; i < embeddingSize; i++) {
+                                                dotProduct += userEmbedding[i] * wordEmbedding[i];
+                                                userMagnitude += userEmbedding[i] * userEmbedding[i];
+                                                wordMagnitude += wordEmbedding[i] * wordEmbedding[i];
+                                            }
+                                            
+                                            userMagnitude = Math.sqrt(userMagnitude);
+                                            wordMagnitude = Math.sqrt(wordMagnitude);
+                                            
+                                            const similarity = dotProduct / (userMagnitude * wordMagnitude);
+                                            
+                                            if (similarity > 0.7) {
+                                                expandedCandidates.push(word);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    
+                    candidateWords = expandedCandidates;
+                }
+                
+                // Build a response using a mix of user words and candidates
+                let responseWords = [];
+                
+                // Start with a greeting word if appropriate
+                if (userWords.some(w => ['hi', 'hello', 'hey'].includes(w)) && 
+                    Math.random() < 0.8) {
+                    responseWords.push('hello');
+                }
+                
+                // Add some user words for context
+                userWords.forEach(word => {
+                    if (Math.random() < 0.3 && !responseWords.includes(word)) {
+                        responseWords.push(word);
+                    }
+                });
+                
+                // Add candidate words
+                candidateWords.forEach(word => {
+                    if (Math.random() < 0.2 && !responseWords.includes(word)) {
+                        responseWords.push(word);
+                    }
+                });
+                
+                // Make sure we have at least some words
+                if (responseWords.length < 3) {
+                    for (let i = 0; i < 3; i++) {
+                        const randomWord = candidateWords[Math.floor(Math.random() * candidateWords.length)];
+                        if (!responseWords.includes(randomWord)) {
+                            responseWords.push(randomWord);
+                        }
+                    }
+                }
+                
+                // Reorder words to make more sense
+                responseWords.sort((a, b) => {
+                    // Check if these words appear together in n-grams
+                    const pairAB = `${a} ${b}`;
+                    const pairBA = `${b} ${a}`;
+                    
+                    const countAB = nGramCounts[pairAB] || 0;
+                    const countBA = nGramCounts[pairBA] || 0;
+                    
+                    return countBA - countAB;
+                });
+                
+                // Capitalize first word and add period
+                if (responseWords.length > 0) {
+                    responseWords[0] = responseWords[0].charAt(0).toUpperCase() + responseWords[0].slice(1);
+                    let response = responseWords.join(' ') + '.';
+                    return response;
+                }
+            }
+            
+            // Fallback responses if we couldn't generate anything
+            const fallbacks = [
+                "Tell me more about that.",
+                "That's interesting! Could you explain further?",
+                "I'm learning about that topic. What else can you share?",
+                "I'd like to understand more about what you mean.",
+                "Could you rephrase that? I'm still learning."
+            ];
+            
+            return fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        }
+        
+        function updateProgress() {
+            // Simple heuristic for learning progress
+            const vocabProgress = Math.min(vocabulary.size / 100, 1);
+            const ngramProgress = Math.min(Object.keys(nGramCounts).length / 200, 1);
+            const rewardProgress = recentRewards.length > 0 ? 
+                (recentRewards.reduce((sum, val) => sum + val, 0) / recentRewards.length + 1) / 2 : 0;
+            
+            const totalProgress = (vocabProgress * 0.3 + ngramProgress * 0.5 + rewardProgress * 0.2) * 100;
+            learningProgressElement.value = totalProgress;
+        }
+        
+        // Add message to chat
+        function addMessage(message, isUser) {
+            const messageElement = document.createElement('div');
+            messageElement.textContent = message;
+            messageElement.className = isUser ? 'user-message' : 'bot-message';
+            
+            if (!isUser) {
+                // Add feedback buttons for bot messages
+                const feedbackDiv = document.createElement('div');
+                feedbackDiv.className = 'feedback-buttons';
+                
+                const goodButton = document.createElement('button');
+                goodButton.textContent = '👍 Good';
+                goodButton.className = 'feedback-button';
+                goodButton.onclick = () => provideFeedback(1, message);
+                
+                const badButton = document.createElement('button');
+                badButton.textContent = '👎 Bad';
+                badButton.className = 'feedback-button';
+                badButton.onclick = () => provideFeedback(-1, message);
+                
+                feedbackDiv.appendChild(goodButton);
+                feedbackDiv.appendChild(badButton);
+                messageElement.appendChild(feedbackDiv);
+            }
+            
+            chatContainer.appendChild(messageElement);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+        
+        // Handle user feedback using reinforcement learning
+        function provideFeedback(reward, botMessage) {
+            updateRewards(reward);
+            
+            const botWords = tokenize(botMessage);
+            const userWords = tokenize(lastUserMessage);
+            
+            // Reinforce associations between user and bot words based on feedback
+            userWords.forEach(userWord => {
+                botWords.forEach(botWord => {
+                    trainOnPair(userWord, botWord, reward);
+                });
+            });
+            
+            updateProgress();
+            visualizeEmbeddings();
+        }
+        
+        let lastUserMessage = "";
+        
+        // Handle user input
+        function handleUserInput() {
+            const message = userInput.value.trim();
+            if (message) {
+                addMessage(message, true);
+                lastUserMessage = message;
+                
+                // Process user message
+                const userWords = tokenize(message);
+                updateVocabulary(userWords);
+                updateNGramModel(userWords);
+                
+                // Generate and send bot response
+                setTimeout(() => {
+                    const botResponse = generateResponse(message);
+                    addMessage(botResponse, false);
+                    
+                    // Learn from this exchange
+                    const botWords = tokenize(botResponse);
+                    updateVocabulary(botWords);
+                    updateNGramModel([...userWords, ...botWords], 3);
+                    
+                    // Train on this conversation pair
+                    userWords.forEach(userWord => {
+                        botWords.forEach(botWord => {
+                            trainOnPair(userWord, botWord);
+                        });
+                    });
+                    
+                    visualizeEmbeddings();
+                }, 500);
+                
+                userInput.value = '';
+            }
+        }
+        
+        // Event listeners
+        sendButton.addEventListener('click', handleUserInput);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleUserInput();
+            }
+        });
+        
+        // Start with a greeting
+        setTimeout(() => {
+            const greeting = "Hello! I'm learning to talk using multiple algorithms. Chat with me and I'll get better over time!";
+            addMessage(greeting, false);
+            
+            // Initialize visualizations
+            visualizeEmbeddings();
+            visualizeRewards();
+        }, 500);
+    </script>
+</body>
+</html>
